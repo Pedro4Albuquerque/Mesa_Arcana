@@ -1,11 +1,11 @@
 {
   "loginUrl": "https://site-fichas-daeva1.vercel.app/login",
   "homeUrl": "https://site-fichas-daeva1.vercel.app",
-  "fichaUrl": "https://site-fichas-daeva1.vercel.app/ficha/1cbcd154-91e0-4cb7-8049-cafb923ecfac",
-  "personagem": "Han Zhen",
-  "email": "jeansouza1000@gmail.com",
-  "senhaLogin": "^Tt7bVofpQ3Sgi&D",
-  "senhaFicha": "0586",
+  "fichaUrl": "https://site-fichas-daeva1.vercel.app/ficha/78d91b38-abc7-40be-be0e-b6c0fee7104d",
+  "personagem": "Liu Chang",
+  "email": "titanevil100@gmail.com",
+  "senhaLogin": "p14725836900",
+  "senhaFicha": "1234",
   "headless": true,
   "timeoutMs": 30000
 }
