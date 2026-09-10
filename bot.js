@@ -4,10 +4,15 @@ const { chromium } = require('playwright');
 
 const ROOT = __dirname;
 const ARTIFACTS = path.join(ROOT, 'artifacts');
+const LOGS_DIR = path.join(ROOT, 'logs');
+const HISTORY_PATH = path.join(LOGS_DIR, 'historico.log');
 const CONFIG_PATH = path.join(ROOT, 'config.json');
+
 fs.mkdirSync(ARTIFACTS, { recursive: true });
+fs.mkdirSync(LOGS_DIR, { recursive: true });
 
 let sensitiveValues = [];
+let historicoRegistrado = false;
 
 function horarioBrasil() {
   return new Intl.DateTimeFormat('pt-BR', {
@@ -23,6 +28,32 @@ function log(message) {
 
 function escapeRegExp(text) {
   return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function limparSegredos(texto) {
+  let output = String(texto ?? '');
+  for (const value of sensitiveValues) {
+    if (!value) continue;
+    output = output.split(value).join('***');
+  }
+  return output;
+}
+
+function textoEmUmaLinha(texto) {
+  return limparSegredos(texto)
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function registrarHistorico(status, detalhe, config = null) {
+  const personagem = textoEmUmaLinha(config?.personagem || 'não identificado');
+  const run = process.env.GITHUB_RUN_NUMBER ? `#${process.env.GITHUB_RUN_NUMBER}` : 'local';
+  const linha = `${horarioBrasil()} | ${personagem} | ${status} | ${textoEmUmaLinha(detalhe)} | ${run}\n`;
+
+  fs.appendFileSync(HISTORY_PATH, linha, 'utf8');
+  historicoRegistrado = true;
+  log(`Histórico registrado: ${status}.`);
 }
 
 function carregarConfig() {
@@ -57,15 +88,6 @@ function validarConfig(config) {
   if (!config.senhaFicha || String(config.senhaFicha).includes('COLOQUE_')) faltando.push('senhaFicha');
   if (!config.personagem || String(config.personagem).includes('COLOQUE_')) faltando.push('personagem');
   if (faltando.length) throw new Error(`Preencha no config.json: ${faltando.join(', ')}.`);
-}
-
-function limparSegredos(texto) {
-  let output = String(texto ?? '');
-  for (const value of sensitiveValues) {
-    if (!value) continue;
-    output = output.split(value).join('***');
-  }
-  return output;
 }
 
 async function salvarDiagnostico(page, prefix) {
@@ -275,12 +297,14 @@ async function tentarMeditar(page, config) {
   const botao = await encontrarBotaoMeditar(page);
   if (!botao) {
     log('Botão +1 QI/Meditar não encontrado nesta verificação. Nada será clicado.');
+    registrarHistorico('INDISPONIVEL', 'Botão +1 QI/Meditar não estava disponível nesta verificação.', config);
     await salvarDiagnostico(page, 'meditar-nao-encontrado');
     return;
   }
 
   if (!(await estaDisponivel(botao))) {
     log('Meditar está indisponível. Nada será clicado.');
+    registrarHistorico('INDISPONIVEL', 'Botão de meditação encontrado, mas estava desabilitado.', config);
     await salvarDiagnostico(page, 'meditar-indisponivel');
     return;
   }
@@ -296,21 +320,24 @@ async function tentarMeditar(page, config) {
   const depois = await encontrarBotaoMeditar(page);
   if (!depois || !(await estaDisponivel(depois))) {
     log('Meditação confirmada pela interface: botão ficou indisponível.');
+    registrarHistorico('MEDITOU', '+1 QI clicado e confirmado pela interface.', config);
   } else {
     log('Clique enviado, mas o botão ainda parece habilitado. O bot não fará segundo clique nesta execução.');
+    registrarHistorico('CLIQUE_ENVIADO', 'Clique em +1 QI foi enviado, mas a interface não confirmou a mudança de estado.', config);
   }
 
   await salvarDiagnostico(page, 'meditacao-realizada');
 }
 
 async function executar() {
-  const config = carregarConfig();
-  validarConfig(config);
-
+  let config = null;
   let browser;
   let page;
 
   try {
+    config = carregarConfig();
+    validarConfig(config);
+
     browser = await chromium.launch({
       headless: config.headless !== false,
       args: ['--no-sandbox', '--disable-dev-shm-usage']
@@ -330,9 +357,20 @@ async function executar() {
     await desbloquearFicha(page, config);
     await tentarMeditar(page, config);
 
+    if (!historicoRegistrado) {
+      registrarHistorico('OK', 'Execução concluída sem clique e sem erro.', config);
+    }
+
     log('Execução finalizada.');
   } catch (error) {
     log(`ERRO: ${error.message}`);
+
+    try {
+      registrarHistorico('ERRO', error.message, config);
+    } catch (historyError) {
+      log(`ERRO AO GRAVAR HISTÓRICO: ${historyError.message}`);
+    }
+
     if (page) await salvarDiagnostico(page, 'erro-execucao');
     process.exitCode = 1;
   } finally {
